@@ -1,0 +1,15 @@
+{
+  "eventTypes": {
+    "order.placed": {
+      "1": "DEPRECATED",
+      "2": "ACTIVE"
+    },
+    "payment.captured": {
+      "1": "ACTIVE"
+    },
+    "customer.registered": {
+      "1": "RETIRED",
+      "2": "ACTIVE"
+    }
+  }
+}

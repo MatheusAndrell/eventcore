@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["customerId", "givenName", "familyName"],
+  "properties": {
+    "customerId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "givenName": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "familyName": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "marketingConsent": { "type": "boolean" }
+  }
+}
