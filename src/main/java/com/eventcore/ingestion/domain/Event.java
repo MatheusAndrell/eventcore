@@ -1,6 +1,7 @@
 package com.eventcore.ingestion.domain;
 
 import com.eventcore.platform.identity.ClientId;
+import com.eventcore.platform.identity.CorrelationId;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -16,7 +17,8 @@ public record Event(
         Instant occurredAt,
         Instant receivedAt,
         EventData data,
-        EventStatus status) {
+        EventStatus status,
+        CorrelationId correlationId) {
 
     public Event {
         Objects.requireNonNull(id, "id");
@@ -29,14 +31,21 @@ public record Event(
         Objects.requireNonNull(receivedAt, "receivedAt");
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(status, "status");
+        Objects.requireNonNull(correlationId, "correlationId");
     }
 
     public static Event receive(
-            EventId id, ClientId clientId, EventSubmission submission, Instant receivedAt, Duration clockSkewTolerance) {
+            EventId id,
+            ClientId clientId,
+            CorrelationId correlationId,
+            EventSubmission submission,
+            Instant receivedAt,
+            Duration clockSkewTolerance) {
         if (submission.occurredAt().isAfter(receivedAt.plus(clockSkewTolerance))) {
             throw new EventOccursInFutureException(submission.occurredAt(), receivedAt, clockSkewTolerance);
         }
         return new Event(id, clientId, submission.type(), submission.dataVersion(), submission.source(),
-                submission.subject(), submission.occurredAt(), receivedAt, submission.data(), EventStatus.RECEIVED);
+                submission.subject(), submission.occurredAt(), receivedAt, submission.data(), EventStatus.RECEIVED,
+                correlationId);
     }
 }

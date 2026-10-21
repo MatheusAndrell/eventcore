@@ -5,6 +5,7 @@ import com.eventcore.ingestion.domain.EventId;
 import com.eventcore.ingestion.domain.IdempotencyKey;
 import com.eventcore.platform.identity.ClientId;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 
 public interface EventStore {
@@ -16,4 +17,6 @@ public interface EventStore {
     void insert(Event event);
 
     Optional<Event> findEvent(ClientId clientId, EventId eventId);
+
+    List<EventSummary> listEvents(ClientId clientId, EventCriteria criteria, Optional<EventCursor> after, int limit);
 }

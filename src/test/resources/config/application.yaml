@@ -1,0 +1,4 @@
+eventcore:
+  security:
+    api-key-peppers: test:dGVzdC1wZXBwZXItdGVzdC1wZXBwZXItdGVzdC1wZXBwZXI=
+    active-api-key-pepper: test

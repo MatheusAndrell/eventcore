@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eventcore.platform.identity.ClientId;
+import com.eventcore.platform.identity.CorrelationId;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -16,23 +17,27 @@ class EventTest {
     private static final Duration TOLERANCE = Duration.ofMinutes(5);
     private static final EventId ID = new EventId(UUID.fromString("0192f3c8-6f1b-7c39-9d0e-2b6c1f0a8e11"));
     private static final ClientId CLIENT = new ClientId(UUID.fromString("0192f3c8-0000-7000-8000-000000000001"));
+    private static final CorrelationId CORRELATION = new CorrelationId("corr-1");
 
     @Test
     void receivesASubmissionInTheReceivedState() {
         EventSubmission submission = submissionAt(RECEIVED_AT.minusSeconds(30));
 
-        Event event = Event.receive(ID, CLIENT, submission, RECEIVED_AT, TOLERANCE);
+        Event event = Event.receive(ID, CLIENT, CORRELATION, submission, RECEIVED_AT, TOLERANCE);
 
         assertThat(event.status()).isEqualTo(EventStatus.RECEIVED);
         assertThat(event.receivedAt()).isEqualTo(RECEIVED_AT);
         assertThat(event.occurredAt()).isEqualTo(submission.occurredAt());
         assertThat(event.type()).isEqualTo(submission.type());
         assertThat(event.data()).isEqualTo(submission.data());
+        assertThat(event.correlationId()).isEqualTo(CORRELATION);
     }
 
     @Test
     void acceptsOccurrencesWithinTheClockSkewTolerance() {
-        Event event = Event.receive(ID, CLIENT, submissionAt(RECEIVED_AT.plus(TOLERANCE)), RECEIVED_AT, TOLERANCE);
+        EventSubmission submission = submissionAt(RECEIVED_AT.plus(TOLERANCE));
+
+        Event event = Event.receive(ID, CLIENT, CORRELATION, submission, RECEIVED_AT, TOLERANCE);
 
         assertThat(event.occurredAt()).isEqualTo(RECEIVED_AT.plus(TOLERANCE));
     }
@@ -41,7 +46,7 @@ class EventTest {
     void rejectsOccurrencesBeyondTheClockSkewTolerance() {
         EventSubmission submission = submissionAt(RECEIVED_AT.plus(TOLERANCE).plusMillis(1));
 
-        assertThatThrownBy(() -> Event.receive(ID, CLIENT, submission, RECEIVED_AT, TOLERANCE))
+        assertThatThrownBy(() -> Event.receive(ID, CLIENT, CORRELATION, submission, RECEIVED_AT, TOLERANCE))
                 .isInstanceOf(EventOccursInFutureException.class);
     }
 

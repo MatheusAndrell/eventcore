@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -94,7 +95,8 @@ public class EnvelopeReader {
 
     private static Instant parseTime(String text) {
         try {
-            return OffsetDateTime.parse(text, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant();
+            return OffsetDateTime.parse(text, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant()
+                    .truncatedTo(ChronoUnit.MICROS);
         } catch (DateTimeParseException exception) {
             throw new InvalidEventAttributeException("time", "must be an RFC 3339 date-time with a UTC offset");
         }

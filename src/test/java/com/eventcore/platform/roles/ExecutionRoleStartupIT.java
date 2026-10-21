@@ -41,7 +41,9 @@ class ExecutionRoleStartupIT {
             Integer serverPort = context.getEnvironment().getProperty("local.server.port", Integer.class);
 
             assertThat(serverPort).isNotNull().isPositive();
-            assertThat(get(serverPort, "/").statusCode()).isEqualTo(404);
+            assertThat(context.containsBean("eventController")).isTrue();
+            assertThat(context.containsBean("adminController")).isTrue();
+            assertThat(get(serverPort, "/").statusCode()).isEqualTo(401);
             assertThat(get(managementPort(context), "/actuator/health/liveness").statusCode()).isEqualTo(200);
             assertThat(get(managementPort(context), "/actuator/health/readiness").statusCode()).isEqualTo(200);
         }
@@ -52,6 +54,8 @@ class ExecutionRoleStartupIT {
     void rolesWithoutApiExposeOnlyTheManagementPort(String roles) throws Exception {
         try (ConfigurableApplicationContext context = start(postgres, roles)) {
             assertThat(((WebServerApplicationContext) context).getWebServer().getPort()).isEqualTo(-1);
+            assertThat(context.containsBean("eventController")).isFalse();
+            assertThat(context.containsBean("adminController")).isFalse();
             assertThat(get(managementPort(context), "/actuator/health/liveness").statusCode()).isEqualTo(200);
             assertThat(get(managementPort(context), "/actuator/health/readiness").statusCode()).isEqualTo(200);
         }

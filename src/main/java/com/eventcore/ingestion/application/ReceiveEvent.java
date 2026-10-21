@@ -16,6 +16,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
@@ -99,10 +100,10 @@ public class ReceiveEvent {
             throw new RejectedSubmission(Rejection.MALFORMED_ENVELOPE, exception.violations());
         }
         requireCatalogAcceptance(submission, command.body().get("data"));
-        Instant receivedAt = clock.instant();
+        Instant receivedAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
         try {
-            return Event.receive(new EventId(ids.next()), command.clientId(), submission, receivedAt,
-                    properties.clockSkewTolerance());
+            return Event.receive(new EventId(ids.next()), command.clientId(), command.correlationId(), submission,
+                    receivedAt, properties.clockSkewTolerance());
         } catch (EventOccursInFutureException exception) {
             throw new RejectedSubmission(Rejection.OCCURRED_IN_FUTURE, List.of(exception.getMessage()));
         }

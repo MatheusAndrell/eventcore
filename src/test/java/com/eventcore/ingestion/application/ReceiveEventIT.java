@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.eventcore.ingestion.domain.IdempotencyKey;
 import com.eventcore.platform.identity.ClientId;
+import com.eventcore.platform.identity.CorrelationId;
 import com.eventcore.platform.json.StrictJsonReader;
 import com.eventcore.support.TestcontainersConfiguration;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,18 +30,32 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {"eventcore.roles=api", "eventcore.ingestion.idempotency-lock-timeout=500ms"})
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, ReceiveEventIT.NanosecondClockConfiguration.class})
 class ReceiveEventIT {
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class NanosecondClockConfiguration {
+
+        @Bean
+        @Primary
+        Clock nanosecondClock() {
+            return Clock.offset(Clock.systemUTC(), Duration.ofNanos(123));
+        }
+    }
 
     private static final ClientId CLIENT = new ClientId(UUID.fromString("0192f3c8-0000-7000-8000-000000000001"));
     private static final ClientId OTHER_CLIENT = new ClientId(UUID.fromString("0192f3c8-0000-7000-8000-000000000002"));
+    private static final CorrelationId CORRELATION = new CorrelationId("receive-event-it");
 
     @Autowired
     private ReceiveEvent receiveEvent;
@@ -54,7 +70,7 @@ class ReceiveEventIT {
 
     @BeforeEach
     void resetDatabase() {
-        jdbc.sql("truncate outbox_message, idempotency_record, event, client cascade").update();
+        jdbc.sql("truncate outbox_message, idempotency_record, event, api_key, client cascade").update();
         insertClient(CLIENT, "acme");
         insertClient(OTHER_CLIENT, "globex");
     }
@@ -257,7 +273,8 @@ class ReceiveEventIT {
     }
 
     private ReceiveEventResult receive(ClientId client, String key, String body) {
-        return receiveEvent.receive(new ReceiveEventCommand(client, new IdempotencyKey(key), json(body)));
+        return receiveEvent.receive(
+                new ReceiveEventCommand(client, new IdempotencyKey(key), CORRELATION, json(body)));
     }
 
     private void assertCounts(long events, long idempotencyRecords, long outboxMessages) {

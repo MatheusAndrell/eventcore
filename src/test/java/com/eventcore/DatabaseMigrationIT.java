@@ -36,7 +36,7 @@ class DatabaseMigrationIT {
                 assertThat(migration.getState()).isEqualTo(MigrationState.SUCCESS));
         assertThat(flyway.info().pending()).isEmpty();
         flyway.validate();
-        assertThat(tables()).contains("client", "event", "idempotency_record", "outbox_message");
+        assertThat(tables()).contains("client", "event", "idempotency_record", "outbox_message", "api_key");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
     }
 
@@ -57,10 +57,18 @@ class DatabaseMigrationIT {
                             gen_random_uuid(), now(), now() + interval '1 day')
                     """)).hasMessageContaining("idempotency_record_key_format");
             assertThatThrownBy(() -> statement.execute("""
-                    insert into event (id, client_id, type, data_version, source, occurred_at, received_at, data, status)
+                    insert into event (
+                        id, client_id, type, data_version, source, occurred_at, received_at, data, status,
+                        correlation_id)
                     values (gen_random_uuid(), '0192f3c8-0000-7000-8000-000000000009', 'order.placed', 1, 'urn:a',
-                            now(), now(), '[]', 'RECEIVED')
+                            now(), now(), '[]', 'RECEIVED', 'corr-1')
                     """)).hasMessageContaining("event_data_object");
+            assertThatThrownBy(() -> statement.execute("""
+                    insert into api_key (
+                        id, client_id, key_id, secret_hash, pepper_id, scopes, status, created_at)
+                    values (gen_random_uuid(), '0192f3c8-0000-7000-8000-000000000009', 'abcdefghijklmnop',
+                            decode(repeat('00', 32), 'hex'), 'p1', array['everything'], 'ACTIVE', now())
+                    """)).hasMessageContaining("api_key_scopes_valid");
         }
     }
 

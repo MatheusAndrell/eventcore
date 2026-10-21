@@ -3,6 +3,11 @@ spring:
     name: eventcore
   lifecycle:
     timeout-per-shutdown-phase: 30s
+  autoconfigure:
+    exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
 
 server:
   port: 8080
@@ -24,3 +29,12 @@ management:
       group:
         readiness:
           include: readinessState,db
+
+springdoc:
+  paths-to-match: /v1/**, /admin/**
+
+eventcore:
+  security:
+    api-key-peppers: ${EVENTCORE_API_KEY_PEPPERS:}
+    active-api-key-pepper: ${EVENTCORE_ACTIVE_API_KEY_PEPPER:}
+    bootstrap-admin-key: ${EVENTCORE_BOOTSTRAP_ADMIN_KEY:}

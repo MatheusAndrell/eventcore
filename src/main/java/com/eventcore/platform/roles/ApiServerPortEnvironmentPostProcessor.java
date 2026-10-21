@@ -4,8 +4,6 @@ import java.util.Map;
 import java.util.Set;
 import org.springframework.boot.EnvironmentPostProcessor;
 import org.springframework.boot.SpringApplication;
-import org.springframework.boot.context.properties.bind.Bindable;
-import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
@@ -17,10 +15,8 @@ public class ApiServerPortEnvironmentPostProcessor implements EnvironmentPostPro
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-        Set<String> roles = Binder.get(environment)
-                .bind("eventcore.roles", Bindable.setOf(String.class))
-                .orElse(Set.of());
-        if (!roles.isEmpty() && roles.stream().noneMatch(ApiServerPortEnvironmentPostProcessor::isApi)) {
+        Set<String> roles = ConfiguredRoles.of(environment);
+        if (!roles.isEmpty() && !ConfiguredRoles.includes(roles, Role.API)) {
             environment.getPropertySources()
                     .addFirst(new MapPropertySource(PROPERTY_SOURCE_NAME, Map.of("server.port", DISABLED_PORT)));
         }
@@ -29,9 +25,5 @@ public class ApiServerPortEnvironmentPostProcessor implements EnvironmentPostPro
     @Override
     public int getOrder() {
         return Ordered.LOWEST_PRECEDENCE;
-    }
-
-    private static boolean isApi(String role) {
-        return Role.API.name().equalsIgnoreCase(role.strip());
     }
 }

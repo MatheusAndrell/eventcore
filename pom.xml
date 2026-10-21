@@ -20,6 +20,7 @@
     <properties>
         <java.version>25</java.version>
         <json-schema-validator.version>3.0.6</json-schema-validator.version>
+        <springdoc.version>3.1.1</springdoc.version>
         <archunit.version>1.5.1</archunit.version>
     </properties>
 
@@ -35,6 +36,15 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+            <version>${springdoc.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
