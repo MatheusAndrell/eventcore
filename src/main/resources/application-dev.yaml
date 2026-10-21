@@ -1,0 +1,10 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: jdbc:postgresql://localhost:${POSTGRES_PORT}/${POSTGRES_DB}
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+
+eventcore:
+  roles: ${EVENTCORE_ROLES}

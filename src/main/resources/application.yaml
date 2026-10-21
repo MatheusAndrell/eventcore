@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: eventcore
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
