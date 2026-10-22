@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eventcore.EventcoreApplication;
+import com.eventcore.platform.messaging.MessagingTopology;
 import com.eventcore.support.Containers;
 import java.io.IOException;
 import java.net.URI;
@@ -16,6 +17,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.context.properties.bind.validation.BindValidationException;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
@@ -23,6 +25,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.rabbitmq.RabbitMQContainer;
 import tools.jackson.databind.json.JsonMapper;
 
 @Testcontainers
@@ -30,8 +33,13 @@ class ExecutionRoleStartupIT {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
+    private static final String UNREACHABLE_BROKER_PORT = "1";
+
     @Container
     static final PostgreSQLContainer postgres = Containers.postgres();
+
+    @Container
+    static final RabbitMQContainer rabbitmq = Containers.rabbitmq();
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
@@ -58,6 +66,26 @@ class ExecutionRoleStartupIT {
             assertThat(context.containsBean("adminController")).isFalse();
             assertThat(get(managementPort(context), "/actuator/health/liveness").statusCode()).isEqualTo(200);
             assertThat(get(managementPort(context), "/actuator/health/readiness").statusCode()).isEqualTo(200);
+            assertThat(context.containsBean("eventcoreTopology")).isTrue();
+            assertThat(context.getBean(AmqpAdmin.class).getQueueInfo(MessagingTopology.EVENT_ACCEPTED_QUEUE))
+                    .isNotNull();
+        }
+    }
+
+    @Test
+    void apiRoleStaysReadyAndHealthyWithoutTheBroker() throws Exception {
+        try (ConfigurableApplicationContext context = start(postgres, "api", UNREACHABLE_BROKER_PORT)) {
+            assertThat(context.containsBean("eventcoreTopology")).isFalse();
+            assertThat(get(managementPort(context), "/actuator/health/readiness").statusCode()).isEqualTo(200);
+            assertThat(get(managementPort(context), "/actuator/health").statusCode()).isEqualTo(200);
+        }
+    }
+
+    @Test
+    void relayRoleIsNotReadyWithoutTheBroker() throws Exception {
+        try (ConfigurableApplicationContext context = start(postgres, "relay", UNREACHABLE_BROKER_PORT)) {
+            assertThat(get(managementPort(context), "/actuator/health/readiness").statusCode()).isEqualTo(503);
+            assertThat(get(managementPort(context), "/actuator/health/liveness").statusCode()).isEqualTo(200);
         }
     }
 
@@ -97,13 +125,22 @@ class ExecutionRoleStartupIT {
     }
 
     private static ConfigurableApplicationContext start(PostgreSQLContainer database, String roles) {
+        return start(database, roles, String.valueOf(rabbitmq.getAmqpPort()));
+    }
+
+    private static ConfigurableApplicationContext start(PostgreSQLContainer database, String roles, String brokerPort) {
         List<String> args = new ArrayList<>(List.of(
                 "--server.port=0",
                 "--management.server.port=0",
                 "--spring.datasource.url=" + database.getJdbcUrl(),
                 "--spring.datasource.username=" + database.getUsername(),
                 "--spring.datasource.password=" + database.getPassword(),
-                "--spring.datasource.hikari.connection-timeout=2000"));
+                "--spring.datasource.hikari.connection-timeout=2000",
+                "--spring.rabbitmq.host=" + rabbitmq.getHost(),
+                "--spring.rabbitmq.port=" + brokerPort,
+                "--spring.rabbitmq.username=" + rabbitmq.getAdminUsername(),
+                "--spring.rabbitmq.password=" + rabbitmq.getAdminPassword(),
+                "--spring.rabbitmq.connection-timeout=1s"));
         if (roles != null) {
             args.add("--eventcore.roles=" + roles);
         }

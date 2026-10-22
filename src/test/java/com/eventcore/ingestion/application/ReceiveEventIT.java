@@ -108,7 +108,7 @@ class ReceiveEventIT {
 
         Map<String, Object> outbox = jdbc.sql("""
                         select aggregate_type, aggregate_id, exchange, routing_key, message_type, message_version,
-                               payload->>'eventId' as event_id, status, available_at = created_at as available_now
+                               payload->>'eventId' as event_id, status, available_at <= now() as available_now
                           from outbox_message
                         """).query().singleRow();
         assertThat(outbox).containsEntry("aggregate_type", "event")
