@@ -8,6 +8,11 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 5s
+    requested-heartbeat: 15s
 
 server:
   port: 8080
@@ -26,9 +31,6 @@ management:
       show-components: never
       probes:
         enabled: true
-      group:
-        readiness:
-          include: readinessState,db
 
 springdoc:
   paths-to-match: /v1/**, /admin/**

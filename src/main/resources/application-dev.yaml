@@ -5,6 +5,11 @@ spring:
     url: jdbc:postgresql://localhost:${POSTGRES_PORT}/${POSTGRES_DB}
     username: ${POSTGRES_USER}
     password: ${POSTGRES_PASSWORD}
+  rabbitmq:
+    host: localhost
+    port: ${RABBITMQ_PORT}
+    username: ${RABBITMQ_DEFAULT_USER}
+    password: ${RABBITMQ_DEFAULT_PASS}
 
 eventcore:
   roles: ${EVENTCORE_ROLES}

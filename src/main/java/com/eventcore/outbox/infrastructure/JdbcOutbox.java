@@ -29,7 +29,7 @@ class JdbcOutbox implements Outbox {
                             message_type, message_version, payload, status, available_at, created_at)
                         values (
                             :id, :aggregateType, :aggregateId, :exchange, :routingKey,
-                            :messageType, :messageVersion, cast(:payload as jsonb), 'PENDING', :createdAt, :createdAt)
+                            :messageType, :messageVersion, cast(:payload as jsonb), 'PENDING', now(), :createdAt)
                         """)
                 .param("id", message.id())
                 .param("aggregateType", message.aggregateType())

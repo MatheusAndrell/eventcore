@@ -13,5 +13,5 @@ import org.springframework.context.annotation.Conditional;
 @Conditional(RoleCondition.class)
 public @interface ConditionalOnRole {
 
-    Role value();
+    Role[] value();
 }
