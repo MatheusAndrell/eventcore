@@ -40,3 +40,5 @@ eventcore:
     api-key-peppers: ${EVENTCORE_API_KEY_PEPPERS:}
     active-api-key-pepper: ${EVENTCORE_ACTIVE_API_KEY_PEPPER:}
     bootstrap-admin-key: ${EVENTCORE_BOOTSTRAP_ADMIN_KEY:}
+    webhook-secret-keys: ${EVENTCORE_WEBHOOK_SECRET_KEYS:}
+    active-webhook-secret-key: ${EVENTCORE_ACTIVE_WEBHOOK_SECRET_KEY:}

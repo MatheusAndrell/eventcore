@@ -2,3 +2,5 @@ eventcore:
   security:
     api-key-peppers: test:dGVzdC1wZXBwZXItdGVzdC1wZXBwZXItdGVzdC1wZXBwZXI=
     active-api-key-pepper: test
+    webhook-secret-keys: test:dGVzdC13ZWJob29rLXNlY3JldC1rZXktMzItYnl0ZXM=
+    active-webhook-secret-key: test

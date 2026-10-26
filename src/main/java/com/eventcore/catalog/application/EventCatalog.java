@@ -18,6 +18,10 @@ public final class EventCatalog {
                 .collect(toUnmodifiableMap(Map.Entry::getKey, entry -> Map.copyOf(entry.getValue())));
     }
 
+    public boolean contains(String type) {
+        return eventTypes.containsKey(type);
+    }
+
     public CatalogCheck check(String type, int version, JsonNode data) {
         Map<Integer, CatalogVersion> versions = eventTypes.get(type);
         if (versions == null) {

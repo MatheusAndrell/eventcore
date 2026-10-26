@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eventcore.EventcoreApplication;
 import com.eventcore.platform.messaging.MessagingTopology;
+import com.eventcore.subscription.application.WebhookSecretCipher;
 import com.eventcore.support.Containers;
 import java.io.IOException;
 import java.net.URI;
@@ -34,6 +35,8 @@ class ExecutionRoleStartupIT {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private static final String UNREACHABLE_BROKER_PORT = "1";
+    private static final String[] WITHOUT_WEBHOOK_SECRET_KEYS = {
+            "--eventcore.security.webhook-secret-keys=", "--eventcore.security.active-webhook-secret-key="};
 
     @Container
     static final PostgreSQLContainer postgres = Containers.postgres();
@@ -117,6 +120,18 @@ class ExecutionRoleStartupIT {
     }
 
     @Test
+    void onlyRolesThatHandleWebhookSecretsRequireTheEncryptionKeys() {
+        try (ConfigurableApplicationContext context = start(postgres, "relay", String.valueOf(rabbitmq.getAmqpPort()),
+                WITHOUT_WEBHOOK_SECRET_KEYS)) {
+            assertThat(context.getBeanNamesForType(WebhookSecretCipher.class)).isEmpty();
+        }
+        assertThatThrownBy(() -> start(postgres, "api", String.valueOf(rabbitmq.getAmqpPort()),
+                WITHOUT_WEBHOOK_SECRET_KEYS).close())
+                .rootCause()
+                .hasMessage("eventcore.security.webhook-secret-keys must define at least one key");
+    }
+
+    @Test
     void applicationDoesNotStartWithoutRoles() {
         assertThatThrownBy(() -> start(postgres, null).close())
                 .rootCause()
@@ -128,7 +143,8 @@ class ExecutionRoleStartupIT {
         return start(database, roles, String.valueOf(rabbitmq.getAmqpPort()));
     }
 
-    private static ConfigurableApplicationContext start(PostgreSQLContainer database, String roles, String brokerPort) {
+    private static ConfigurableApplicationContext start(
+            PostgreSQLContainer database, String roles, String brokerPort, String... extraArgs) {
         List<String> args = new ArrayList<>(List.of(
                 "--server.port=0",
                 "--management.server.port=0",
@@ -141,6 +157,7 @@ class ExecutionRoleStartupIT {
                 "--spring.rabbitmq.username=" + rabbitmq.getAdminUsername(),
                 "--spring.rabbitmq.password=" + rabbitmq.getAdminPassword(),
                 "--spring.rabbitmq.connection-timeout=1s"));
+        args.addAll(List.of(extraArgs));
         if (roles != null) {
             args.add("--eventcore.roles=" + roles);
         }

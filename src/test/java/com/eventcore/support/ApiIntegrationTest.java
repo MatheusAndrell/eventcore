@@ -27,8 +27,9 @@ import tools.jackson.databind.json.JsonMapper;
         properties = {
                 "eventcore.roles=api",
                 "management.server.port=0",
-                "eventcore.ingestion.idempotency-lock-timeout=500ms"})
-@Import(TestcontainersConfiguration.class)
+                "eventcore.ingestion.idempotency-lock-timeout=500ms",
+                "eventcore.subscriptions.max-per-client=3"})
+@Import({TestcontainersConfiguration.class, StaticHostResolverConfiguration.class})
 public abstract class ApiIntegrationTest {
 
     protected static final JsonMapper JSON = JsonMapper.builder().build();

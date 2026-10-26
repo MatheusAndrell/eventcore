@@ -36,7 +36,8 @@ class DatabaseMigrationIT {
                 assertThat(migration.getState()).isEqualTo(MigrationState.SUCCESS));
         assertThat(flyway.info().pending()).isEmpty();
         flyway.validate();
-        assertThat(tables()).contains("client", "event", "idempotency_record", "outbox_message", "api_key");
+        assertThat(tables()).contains("client", "event", "idempotency_record", "outbox_message", "api_key",
+                "subscription", "subscription_secret");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
     }
 
@@ -69,6 +70,40 @@ class DatabaseMigrationIT {
                     values (gen_random_uuid(), '0192f3c8-0000-7000-8000-000000000009', 'abcdefghijklmnop',
                             decode(repeat('00', 32), 'hex'), 'p1', array['everything'], 'ACTIVE', now())
                     """)).hasMessageContaining("api_key_scopes_valid");
+            statement.execute("""
+                    insert into subscription (
+                        id, client_id, endpoint_url, event_types, status, created_at, updated_at)
+                    values ('0192f3c8-0000-7000-8000-000000000101', '0192f3c8-0000-7000-8000-000000000009',
+                            'https://hooks.acme.example/in', array['order.placed'], 'ACTIVE', now(), now())
+                    """);
+            assertThatThrownBy(() -> statement.execute("""
+                    insert into subscription (
+                        id, client_id, endpoint_url, event_types, status, created_at, updated_at)
+                    values (gen_random_uuid(), '0192f3c8-0000-7000-8000-000000000009',
+                            'http://hooks.acme.example/in', array['order.placed'], 'ACTIVE', now(), now())
+                    """)).hasMessageContaining("subscription_endpoint_url_https");
+            assertThatThrownBy(() -> statement.execute("""
+                    insert into subscription (
+                        id, client_id, endpoint_url, event_types, status, created_at, updated_at)
+                    values (gen_random_uuid(), '0192f3c8-0000-7000-8000-000000000009',
+                            'https://hooks.acme.example/in', array['order.placed'], 'DELETED', now(), now())
+                    """)).hasMessageContaining("subscription_deletion_consistent");
+            statement.execute("""
+                    insert into subscription_secret (id, subscription_id, key_id, nonce, ciphertext, created_at)
+                    values (gen_random_uuid(), '0192f3c8-0000-7000-8000-000000000101', 'k1',
+                            decode(repeat('00', 12), 'hex'), decode(repeat('00', 48), 'hex'), now())
+                    """);
+            assertThatThrownBy(() -> statement.execute("""
+                    insert into subscription_secret (id, subscription_id, key_id, nonce, ciphertext, created_at)
+                    values (gen_random_uuid(), '0192f3c8-0000-7000-8000-000000000101', 'k1',
+                            decode(repeat('00', 12), 'hex'), decode(repeat('00', 48), 'hex'), now())
+                    """)).hasMessageContaining("subscription_secret_current_idx");
+            assertThatThrownBy(() -> statement.execute("""
+                    insert into subscription_secret (
+                        id, subscription_id, key_id, nonce, ciphertext, created_at, expires_at)
+                    values (gen_random_uuid(), '0192f3c8-0000-7000-8000-000000000101', 'k1',
+                            decode(repeat('00', 8), 'hex'), decode(repeat('00', 48), 'hex'), now(), now())
+                    """)).hasMessageContaining("subscription_secret_nonce_length");
         }
     }
 

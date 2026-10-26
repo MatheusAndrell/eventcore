@@ -51,6 +51,8 @@ class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/v1/events").hasAuthority(authority(Scope.EVENTS_WRITE))
                         .requestMatchers(HttpMethod.GET, "/v1/events", "/v1/events/*")
                         .hasAuthority(authority(Scope.EVENTS_READ))
+                        .requestMatchers("/v1/subscriptions", "/v1/subscriptions/**")
+                        .hasAuthority(authority(Scope.SUBSCRIPTIONS_MANAGE))
                         .requestMatchers("/admin/**").hasAuthority(authority(Scope.ADMIN))
                         .requestMatchers(HttpMethod.GET, "/v3/api-docs", "/v3/api-docs/**").authenticated()
                         .anyRequest().denyAll());

@@ -35,7 +35,7 @@ class ApiKeyHasherTest {
     void requiresTheActivePepperToBeConfigured() {
         assertThatThrownBy(() -> hasher(List.of("p1:" + PEPPER_A), "p2"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("'p2' is not a configured pepper id");
+                .hasMessageContaining("eventcore.security.active-api-key-pepper 'p2' is not a configured key id");
     }
 
     @Test

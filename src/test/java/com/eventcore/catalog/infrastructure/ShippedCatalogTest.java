@@ -50,6 +50,13 @@ class ShippedCatalogTest {
     }
 
     @Test
+    void knowsWhichEventTypesAreRegistered() {
+        assertThat(catalog.contains("order.placed")).isTrue();
+        assertThat(catalog.contains("customer.registered")).isTrue();
+        assertThat(catalog.contains("order.shipped")).isFalse();
+    }
+
+    @Test
     void publishedSchemasMatchTheLockFile() throws IOException {
         assertThat(schemaDigests()).isEqualTo(lockedDigests());
     }

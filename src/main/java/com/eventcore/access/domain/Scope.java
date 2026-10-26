@@ -6,6 +6,7 @@ import java.util.Optional;
 public enum Scope {
     EVENTS_WRITE("events:write"),
     EVENTS_READ("events:read"),
+    SUBSCRIPTIONS_MANAGE("subscriptions:manage"),
     ADMIN("admin");
 
     private final String value;
