@@ -34,7 +34,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE, properties = "eventcore.roles=worker")
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = {"eventcore.roles=worker", "spring.rabbitmq.listener.simple.auto-startup=false"})
 @Import(TestcontainersConfiguration.class)
 class OutboxPublisherIT {
 

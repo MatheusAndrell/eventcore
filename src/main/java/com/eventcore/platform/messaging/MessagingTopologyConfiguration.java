@@ -23,11 +23,15 @@ class MessagingTopologyConfiguration {
         FanoutExchange deadLetters = ExchangeBuilder.fanoutExchange(MessagingTopology.DEAD_LETTER_EXCHANGE)
                 .durable(true).build();
         Queue eventAccepted = workQueue(MessagingTopology.EVENT_ACCEPTED_QUEUE);
+        Queue deliveryRequested = workQueue(MessagingTopology.DELIVERY_REQUESTED_QUEUE);
         Queue parking = QueueBuilder.durable(MessagingTopology.PARKING_QUEUE).quorum().build();
         Binding eventAcceptedBinding = BindingBuilder.bind(eventAccepted).to(events)
                 .with(MessagingTopology.EVENT_ACCEPTED_ROUTING_KEY);
+        Binding deliveryRequestedBinding = BindingBuilder.bind(deliveryRequested).to(events)
+                .with(MessagingTopology.DELIVERY_REQUESTED_ROUTING_KEY);
         Binding parkingBinding = BindingBuilder.bind(parking).to(deadLetters);
-        return new Declarables(events, deadLetters, eventAccepted, parking, eventAcceptedBinding, parkingBinding);
+        return new Declarables(events, deadLetters, eventAccepted, deliveryRequested, parking, eventAcceptedBinding,
+                deliveryRequestedBinding, parkingBinding);
     }
 
     private static Queue workQueue(String name) {

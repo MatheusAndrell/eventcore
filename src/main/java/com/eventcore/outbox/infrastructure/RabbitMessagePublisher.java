@@ -3,6 +3,7 @@ package com.eventcore.outbox.infrastructure;
 import com.eventcore.outbox.application.MessagePublisher;
 import com.eventcore.outbox.application.PendingMessage;
 import com.eventcore.outbox.application.PublishOutcome;
+import com.eventcore.platform.messaging.MessageHeaders;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Date;
@@ -26,9 +27,6 @@ import org.springframework.stereotype.Component;
 
 @Component
 class RabbitMessagePublisher implements MessagePublisher {
-
-    static final String MESSAGE_VERSION_HEADER = "eventcore-message-version";
-    static final String AGGREGATE_ID_HEADER = "eventcore-aggregate-id";
 
     private final RabbitTemplate template;
 
@@ -84,8 +82,8 @@ class RabbitMessagePublisher implements MessagePublisher {
                 .setContentEncoding(StandardCharsets.UTF_8.name())
                 .setDeliveryMode(MessageDeliveryMode.PERSISTENT)
                 .setTimestamp(Date.from(message.createdAt()))
-                .setHeader(MESSAGE_VERSION_HEADER, message.messageVersion())
-                .setHeader(AGGREGATE_ID_HEADER, message.aggregateId().toString())
+                .setHeader(MessageHeaders.MESSAGE_VERSION, message.messageVersion())
+                .setHeader(MessageHeaders.AGGREGATE_ID, message.aggregateId().toString())
                 .build();
     }
 

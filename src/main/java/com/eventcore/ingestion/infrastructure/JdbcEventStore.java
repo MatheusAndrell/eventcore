@@ -132,6 +132,19 @@ class JdbcEventStore implements EventStore {
     }
 
     @Override
+    public Optional<Event> findEvent(EventId eventId) {
+        return jdbc.sql("""
+                        select id, client_id, type, data_version, source, subject,
+                               occurred_at, received_at, data::text as data, status, correlation_id
+                          from event
+                         where id = :id
+                        """)
+                .param("id", eventId.value())
+                .query(JdbcEventStore::event)
+                .optional();
+    }
+
+    @Override
     public List<EventSummary> listEvents(
             ClientId clientId, EventCriteria criteria, Optional<EventCursor> after, int limit) {
         return jdbc.sql("""

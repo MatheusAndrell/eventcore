@@ -49,6 +49,36 @@ class WebhookSecretCipherTest {
     }
 
     @Test
+    void decryptsSecretsEncryptedWithAnyConfiguredKey() {
+        WebhookSecret secret = WebhookSecret.generate(new SecureRandom());
+        UUID secretId = UUID.randomUUID();
+        EncryptedSecret encryptedWithOldKey = cipher("k1").encrypt(secret, secretId);
+
+        assertThat(cipher.decrypt(encryptedWithOldKey, secretId).key()).isEqualTo(secret.key());
+        assertThat(cipher.decrypt(cipher.encrypt(secret, secretId), secretId).key()).isEqualTo(secret.key());
+    }
+
+    @Test
+    void refusesTamperedOrUnreadableSecrets() {
+        UUID secretId = UUID.randomUUID();
+        EncryptedSecret encrypted = cipher.encrypt(WebhookSecret.generate(new SecureRandom()), secretId);
+        byte[] tampered = encrypted.ciphertext();
+        tampered[0] ^= 1;
+        WebhookSecretCipher withoutOldKey = new WebhookSecretCipher(new WebhookSecretProperties(
+                List.of("k3:" + Base64.getEncoder().encodeToString(KEY_1)), "k3"));
+
+        assertThatThrownBy(() -> cipher.decrypt(encrypted, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed authentication");
+        assertThatThrownBy(() -> cipher.decrypt(new EncryptedSecret("k2", encrypted.nonce(), tampered), secretId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed authentication");
+        assertThatThrownBy(() -> withoutOldKey.decrypt(encrypted, secretId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("key 'k2', which is not configured");
+    }
+
+    @Test
     void neverReusesANonce() {
         WebhookSecret secret = WebhookSecret.generate(new SecureRandom());
         UUID secretId = UUID.randomUUID();

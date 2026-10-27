@@ -90,6 +90,8 @@ class SubscriptionAttributesTest {
         assertThat(secret.key()).hasSize(32);
         assertThat(secret).hasToString("whsec_<redacted>");
         assertThat(WebhookSecret.generate(new SecureRandom()).value()).isNotEqualTo(secret.value());
+        assertThat(WebhookSecret.of(secret.key()).value()).isEqualTo(secret.value());
+        assertThatThrownBy(() -> WebhookSecret.of(new byte[16])).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

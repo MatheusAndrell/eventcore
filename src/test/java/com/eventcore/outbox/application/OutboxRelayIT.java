@@ -107,7 +107,8 @@ class OutboxRelayIT {
                 "--spring.rabbitmq.port=" + rabbitmq.getAmqpPort(),
                 "--spring.rabbitmq.username=" + rabbitmq.getAdminUsername(),
                 "--spring.rabbitmq.password=" + rabbitmq.getAdminPassword(),
-                "--eventcore.outbox.poll-interval=50ms");
+                "--eventcore.outbox.poll-interval=50ms",
+                "--spring.rabbitmq.listener.simple.auto-startup=false");
     }
 
     private static JdbcClient reset(ConfigurableApplicationContext context) {

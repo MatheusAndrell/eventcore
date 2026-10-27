@@ -13,6 +13,10 @@ spring:
     publisher-returns: true
     connection-timeout: 5s
     requested-heartbeat: 15s
+    listener:
+      simple:
+        concurrency: 4
+        prefetch: 5
 
 server:
   port: 8080

@@ -34,7 +34,9 @@ import org.testcontainers.rabbitmq.RabbitMQContainer;
 import org.testcontainers.toxiproxy.ToxiproxyContainer;
 
 @Testcontainers
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE, properties = "eventcore.roles=worker")
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = {"eventcore.roles=worker", "spring.rabbitmq.listener.simple.auto-startup=false"})
 @Import(PostgresContainerConfiguration.class)
 class OutboxBrokerFailureIT {
 

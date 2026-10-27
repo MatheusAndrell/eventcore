@@ -37,7 +37,7 @@ class DatabaseMigrationIT {
         assertThat(flyway.info().pending()).isEmpty();
         flyway.validate();
         assertThat(tables()).contains("client", "event", "idempotency_record", "outbox_message", "api_key",
-                "subscription", "subscription_secret");
+                "subscription", "subscription_secret", "delivery", "delivery_attempt");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
     }
 

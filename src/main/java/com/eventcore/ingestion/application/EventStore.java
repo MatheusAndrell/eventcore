@@ -18,5 +18,7 @@ public interface EventStore {
 
     Optional<Event> findEvent(ClientId clientId, EventId eventId);
 
+    Optional<Event> findEvent(EventId eventId);
+
     List<EventSummary> listEvents(ClientId clientId, EventCriteria criteria, Optional<EventCursor> after, int limit);
 }

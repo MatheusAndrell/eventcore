@@ -20,6 +20,13 @@ public final class WebhookSecret {
         return new WebhookSecret(key);
     }
 
+    public static WebhookSecret of(byte[] key) {
+        if (key == null || key.length != KEY_BYTES) {
+            throw new IllegalArgumentException("webhook secrets must have " + KEY_BYTES + " bytes");
+        }
+        return new WebhookSecret(key.clone());
+    }
+
     public byte[] key() {
         return key.clone();
     }

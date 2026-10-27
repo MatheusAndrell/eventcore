@@ -1,6 +1,8 @@
 package com.eventcore.subscription.infrastructure;
 
 import com.eventcore.platform.identity.ClientId;
+import com.eventcore.subscription.application.EncryptedSecret;
+import com.eventcore.subscription.application.StoredSecret;
 import com.eventcore.subscription.application.SubscriptionSecret;
 import com.eventcore.subscription.application.SubscriptionStore;
 import com.eventcore.subscription.domain.SubscribedEventTypes;
@@ -160,6 +162,41 @@ class JdbcSubscriptionStore implements SubscriptionStore {
         jdbc.sql("delete from subscription_secret where subscription_id = :subscriptionId")
                 .param("subscriptionId", subscriptionId)
                 .update();
+    }
+
+    @Override
+    public List<UUID> activeSubscriptionIds(ClientId clientId, String eventType) {
+        return jdbc.sql("""
+                        select id from subscription
+                         where client_id = :clientId and status = 'ACTIVE' and :eventType = any (event_types)
+                         order by id
+                        """)
+                .param("clientId", clientId.value())
+                .param("eventType", eventType)
+                .query(UUID.class)
+                .list();
+    }
+
+    @Override
+    public Optional<Subscription> findUndeleted(UUID subscriptionId) {
+        return jdbc.sql("select " + SUBSCRIPTION_COLUMNS + " from subscription where id = :id and status <> 'DELETED'")
+                .param("id", subscriptionId)
+                .query(JdbcSubscriptionStore::subscription)
+                .optional();
+    }
+
+    @Override
+    public List<StoredSecret> validSecrets(UUID subscriptionId, Instant now) {
+        return jdbc.sql("""
+                        select id, key_id, nonce, ciphertext from subscription_secret
+                         where subscription_id = :subscriptionId and (expires_at is null or expires_at > :now)
+                         order by created_at desc, id
+                        """)
+                .param("subscriptionId", subscriptionId)
+                .param("now", utc(now))
+                .query((row, rowNumber) -> new StoredSecret(row.getObject("id", UUID.class),
+                        new EncryptedSecret(row.getString("key_id"), row.getBytes("nonce"), row.getBytes("ciphertext"))))
+                .list();
     }
 
     private Optional<Subscription> findSubscription(ClientId clientId, UUID subscriptionId, String lockClause) {

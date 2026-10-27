@@ -32,4 +32,10 @@ public interface SubscriptionStore {
     void deleteSecretsExpiredBy(UUID subscriptionId, Instant now);
 
     void deleteSecrets(UUID subscriptionId);
+
+    List<UUID> activeSubscriptionIds(ClientId clientId, String eventType);
+
+    Optional<Subscription> findUndeleted(UUID subscriptionId);
+
+    List<StoredSecret> validSecrets(UUID subscriptionId, Instant now);
 }

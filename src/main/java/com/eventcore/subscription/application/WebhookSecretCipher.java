@@ -9,8 +9,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.UUID;
+import javax.crypto.AEADBadTagException;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -39,6 +41,22 @@ public class WebhookSecretCipher {
             cipher.init(Cipher.ENCRYPT_MODE, keys.active(), new GCMParameterSpec(TAG_BITS, nonce));
             cipher.updateAAD(associatedData(keys.activeId(), secretId));
             return new EncryptedSecret(keys.activeId(), nonce, cipher.doFinal(secret.key()));
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("AES-GCM is required by the Java platform", exception);
+        }
+    }
+
+    public WebhookSecret decrypt(EncryptedSecret encrypted, UUID secretId) {
+        SecretKeySpec key = keys.find(encrypted.keyId()).orElseThrow(() -> new IllegalStateException(
+                "webhook secret " + secretId + " is encrypted with key '" + encrypted.keyId()
+                        + "', which is not configured in eventcore.security.webhook-secret-keys"));
+        try {
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, encrypted.nonce()));
+            cipher.updateAAD(associatedData(encrypted.keyId(), secretId));
+            return WebhookSecret.of(cipher.doFinal(encrypted.ciphertext()));
+        } catch (AEADBadTagException exception) {
+            throw new IllegalStateException("webhook secret " + secretId + " failed authentication", exception);
         } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("AES-GCM is required by the Java platform", exception);
         }

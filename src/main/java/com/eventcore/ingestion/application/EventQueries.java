@@ -5,6 +5,7 @@ import com.eventcore.ingestion.domain.EventId;
 import com.eventcore.platform.identity.ClientId;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -20,6 +21,10 @@ public class EventQueries {
 
     public Optional<Event> find(ClientId clientId, EventId eventId) {
         return store.findEvent(clientId, eventId);
+    }
+
+    public Optional<EventView> view(UUID eventId) {
+        return store.findEvent(new EventId(eventId)).map(EventView::of);
     }
 
     public EventPage list(ClientId clientId, EventCriteria criteria, Optional<EventCursor> after, int limit) {
