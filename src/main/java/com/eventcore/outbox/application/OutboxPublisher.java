@@ -1,5 +1,6 @@
 package com.eventcore.outbox.application;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -12,15 +13,19 @@ public class OutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxPublisher.class);
     private static final int MAX_ERROR_LENGTH = 512;
+    private static final String PUBLISHED_METRIC = "eventcore.outbox.published";
 
     private final OutboxStore store;
     private final MessagePublisher publisher;
     private final OutboxProperties properties;
+    private final MeterRegistry meters;
 
-    public OutboxPublisher(OutboxStore store, MessagePublisher publisher, OutboxProperties properties) {
+    public OutboxPublisher(
+            OutboxStore store, MessagePublisher publisher, OutboxProperties properties, MeterRegistry meters) {
         this.store = store;
         this.publisher = publisher;
         this.properties = properties;
+        this.meters = meters;
     }
 
     public BatchResult publishBatch() {
@@ -35,6 +40,7 @@ public class OutboxPublisher {
         boolean brokerUnavailable = false;
         for (PendingMessage message : claimed) {
             PublishOutcome outcome = outcomes.getOrDefault(message.id(), new PublishOutcome.TimedOut());
+            meters.counter(PUBLISHED_METRIC, "outcome", metricName(outcome)).increment();
             if (outcome instanceof PublishOutcome.Confirmed) {
                 published += markPublished(message, claimToken) ? 1 : 0;
             } else {
@@ -65,6 +71,16 @@ public class OutboxPublisher {
         }
         store.reschedule(message.id(), claimToken, properties.retryDelay(message.publishAttempts()),
                 truncate(error));
+    }
+
+    private static String metricName(PublishOutcome outcome) {
+        return switch (outcome) {
+            case PublishOutcome.Confirmed _ -> "confirmed";
+            case PublishOutcome.Nacked _ -> "nacked";
+            case PublishOutcome.Returned _ -> "returned";
+            case PublishOutcome.TimedOut _ -> "timed_out";
+            case PublishOutcome.Failed _ -> "failed";
+        };
     }
 
     private static String describe(PublishOutcome outcome) {

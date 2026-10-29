@@ -5,6 +5,7 @@ import java.util.regex.Pattern;
 
 public record CorrelationId(String value) {
 
+    public static final String MDC_KEY = "correlationId";
     private static final Pattern FORMAT = Pattern.compile("[A-Za-z0-9._:-]{1,64}");
 
     public CorrelationId {

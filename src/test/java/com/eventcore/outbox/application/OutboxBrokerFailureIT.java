@@ -12,6 +12,7 @@ import com.eventcore.support.PostgresContainerConfiguration;
 import eu.rekawek.toxiproxy.Proxy;
 import eu.rekawek.toxiproxy.ToxiproxyClient;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.UUID;
@@ -142,7 +143,7 @@ class OutboxBrokerFailureIT {
 
     private OutboxPublisher publisher(Duration confirmTimeout) {
         return new OutboxPublisher(store, messagePublisher, new OutboxProperties(10, Duration.ofMillis(50),
-                Duration.ofSeconds(10), confirmTimeout, Duration.ofMillis(100), Duration.ofSeconds(1)));
+                Duration.ofSeconds(10), confirmTimeout, Duration.ofMillis(100), Duration.ofSeconds(1)), new SimpleMeterRegistry());
     }
 
     private void makeAvailableNow() {

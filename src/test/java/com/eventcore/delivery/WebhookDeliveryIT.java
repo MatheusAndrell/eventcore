@@ -5,35 +5,20 @@ import static com.eventcore.support.StaticHostResolverConfiguration.REBINDING_HO
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-import com.eventcore.access.application.ClientAdministration;
-import com.eventcore.access.domain.ClientName;
 import com.eventcore.delivery.application.DeliverWebhook;
 import com.eventcore.delivery.application.DispatchEvent;
 import com.eventcore.delivery.domain.DeliveryStatus;
-import com.eventcore.ingestion.application.ReceiveEvent;
-import com.eventcore.ingestion.application.ReceiveEventCommand;
-import com.eventcore.ingestion.application.ReceiveEventResult;
-import com.eventcore.ingestion.domain.IdempotencyKey;
-import com.eventcore.platform.egress.EgressPolicy;
-import com.eventcore.platform.egress.EgressProperties;
-import com.eventcore.platform.egress.HostResolver;
-import com.eventcore.platform.identity.ClientId;
-import com.eventcore.platform.identity.CorrelationId;
 import com.eventcore.platform.json.JsonCanonicalizer;
 import com.eventcore.platform.json.StrictJsonReader;
 import com.eventcore.platform.messaging.MessageHeaders;
 import com.eventcore.platform.messaging.MessagingTopology;
 import com.eventcore.subscription.application.CreatedSubscription;
-import com.eventcore.subscription.application.SubscriptionManagement;
 import com.eventcore.subscription.domain.SubscribedEventTypes;
 import com.eventcore.subscription.domain.SubscriptionChanges;
 import com.eventcore.subscription.domain.SubscriptionStatus;
 import com.eventcore.subscription.domain.WebhookEndpoint;
-import com.eventcore.support.StaticHostResolverConfiguration;
-import com.eventcore.support.TestcontainersConfiguration;
-import com.eventcore.support.WebhookReceiver;
+import com.eventcore.support.DeliveryIntegrationTest;
 import com.eventcore.support.WebhookReceiver.ReceivedWebhook;
-import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Duration;
@@ -47,55 +32,17 @@ import java.util.Optional;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
-import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {
-                "eventcore.roles=api,relay,worker",
-                "management.server.port=0",
-                "eventcore.outbox.poll-interval=50ms",
-                "eventcore.delivery.connect-timeout=1s",
-                "eventcore.delivery.response-timeout=1s",
-                "eventcore.delivery.request-timeout=2s",
-                "eventcore.delivery.lease=10s",
-                "eventcore.delivery.ssl-bundle=webhook-receivers"})
-@Import({TestcontainersConfiguration.class, StaticHostResolverConfiguration.class,
-        WebhookDeliveryIT.ReceiverEgressPolicy.class})
-class WebhookDeliveryIT {
+class WebhookDeliveryIT extends DeliveryIntegrationTest {
 
-    private static final JsonMapper JSON = JsonMapper.builder().build();
-    private static final Duration DELIVERY_TIMEOUT = Duration.ofSeconds(20);
-    private static final WebhookReceiver receiver = WebhookReceiver.start();
-
-    @Autowired
-    private JdbcClient jdbc;
-
-    @Autowired
-    private ClientAdministration administration;
-
-    @Autowired
-    private SubscriptionManagement subscriptions;
-
-    @Autowired
-    private ReceiveEvent receiveEvent;
+    private static final Duration PARKING_TIMEOUT = Duration.ofSeconds(8);
 
     @Autowired
     private DispatchEvent dispatchEvent;
@@ -105,30 +52,6 @@ class WebhookDeliveryIT {
 
     @Autowired
     private RabbitTemplate rabbit;
-
-    private ClientId client;
-
-    @DynamicPropertySource
-    static void receiverProperties(DynamicPropertyRegistry registry) {
-        registry.add("eventcore.egress.allowed-ports",
-                () -> "443," + receiver.port() + "," + receiver.tricklingPort());
-        registry.add("spring.ssl.bundle.jks.webhook-receivers.truststore.location",
-                () -> receiver.trustStore().toUri().toString());
-        registry.add("spring.ssl.bundle.jks.webhook-receivers.truststore.password", receiver::trustStorePassword);
-        registry.add("spring.ssl.bundle.jks.webhook-receivers.truststore.type", () -> "PKCS12");
-    }
-
-    @AfterAll
-    static void stopReceiver() {
-        receiver.close();
-    }
-
-    @BeforeEach
-    void reset() {
-        jdbc.sql("truncate outbox_message, idempotency_record, event, api_key, client cascade").update();
-        receiver.reset();
-        client = administration.createClient(new ClientName("acme")).id();
-    }
 
     @Test
     void deliversSignedEventsToEveryMatchingActiveSubscription() throws GeneralSecurityException {
@@ -147,6 +70,8 @@ class WebhookDeliveryIT {
         assertThat(deliveries).extracting(row -> row.get("attempts")).containsOnly(1);
         assertThat(receiver.received()).extracting(ReceivedWebhook::path)
                 .containsExactlyInAnyOrder("/payments", "/everything");
+        assertThat(jdbc.sql("select status from event where id = :id").param("id", eventId).query(String.class)
+                .single()).isEqualTo("DISPATCHED");
 
         ReceivedWebhook webhook = receiver.received("/payments").getFirst();
         assertThat(webhook.method()).isEqualTo("POST");
@@ -157,9 +82,9 @@ class WebhookDeliveryIT {
         assertThat(webhook.header("user-agent")).isEqualTo("EventCore-Webhooks/1");
         assertThat(webhook.header("eventcore-delivery-id")).isEqualTo(deliveryFor(eventId, payments).toString());
         assertThat(signatures(webhook)).containsExactly(expectedSignature(webhook, payments.secret().value()));
-        assertThat(signatures(receiver.received("/everything").getFirst()))
-                .containsExactly(expectedSignature(receiver.received("/everything").getFirst(),
-                        everything.secret().value()));
+        ReceivedWebhook toEverything = receiver.received("/everything").getFirst();
+        assertThat(signatures(toEverything))
+                .containsExactly(expectedSignature(toEverything, everything.secret().value()));
 
         JsonNode body = JSON.readTree(webhook.bodyText());
         assertThat(body.get("id").stringValue()).isEqualTo(eventId.toString());
@@ -191,7 +116,7 @@ class WebhookDeliveryIT {
     }
 
     @Test
-    void recordsRejectedAndRedirectedDeliveriesAsFailed() {
+    void retriesRejectedAndRedirectedDeliveriesUntilTheAttemptsRunOut() {
         subscribe("/rejecting", "payment.captured");
         subscribe("/redirecting", "payment.captured");
         receiver.reply("/rejecting", 500);
@@ -201,14 +126,29 @@ class WebhookDeliveryIT {
 
         List<Map<String, Object>> deliveries = awaitDeliveries(eventId, 2);
         assertThat(deliveries).extracting(row -> row.get("status")).containsOnly("FAILED");
+        assertThat(deliveries).extracting(row -> row.get("attempts")).containsOnly(3);
         assertThat(deliveries).extracting(row -> row.get("last_error"))
                 .containsExactlyInAnyOrder("HTTP 500", "HTTP 302");
-        assertThat(receiver.received()).extracting(ReceivedWebhook::path)
-                .containsExactlyInAnyOrder("/rejecting", "/redirecting");
-        assertThat(jdbc.sql("""
-                        select a.http_status from delivery_attempt a join delivery d on d.id = a.delivery_id
-                         where d.event_id = :eventId and not a.succeeded order by a.http_status
-                        """).param("eventId", eventId).query(Integer.class).list()).containsExactly(302, 500);
+        assertThat(receiver.received("/rejecting")).hasSize(3);
+        assertThat(receiver.received("/redirecting")).hasSize(3);
+        assertThat(receiver.received("/elsewhere")).isEmpty();
+        assertThat(deliveries).allSatisfy(row -> assertThat(attemptStatuses((UUID) row.get("id")))
+                .hasSize(3).containsOnly(row.get("last_error").equals("HTTP 500") ? 500 : 302));
+    }
+
+    @Test
+    void succeedsWhenTheReceiverRecoversBeforeTheAttemptsRunOut() {
+        subscribe("/flaky", "payment.captured");
+        receiver.replyInOrder("/flaky", 503, 500);
+
+        UUID eventId = receivePayment("payment-flaky");
+
+        Map<String, Object> delivery = awaitDeliveries(eventId, 1).getFirst();
+        assertThat(delivery.get("status")).isEqualTo("SUCCEEDED");
+        assertThat(delivery.get("attempts")).isEqualTo(3);
+        assertThat(attemptStatuses((UUID) delivery.get("id"))).containsExactly(503, 500, 204);
+        assertThat(receiver.received("/flaky")).extracting(webhook -> webhook.header("webhook-id")).containsOnly(
+                eventId.toString());
     }
 
     @Test
@@ -221,10 +161,8 @@ class WebhookDeliveryIT {
         Map<String, Object> delivery = awaitDeliveries(eventId, 1).getFirst();
         assertThat(delivery.get("status")).isEqualTo("FAILED");
         assertThat((String) delivery.get("last_error")).isNotBlank().doesNotStartWith("HTTP");
-        assertThat(jdbc.sql("""
-                        select a.duration_ms from delivery_attempt a join delivery d on d.id = a.delivery_id
-                         where d.event_id = :eventId
-                        """).param("eventId", eventId).query(Long.class).single()).isLessThan(4_000L);
+        assertThat(attemptDurations(eventId)).hasSize(3).allSatisfy(duration -> assertThat(duration)
+                .isLessThan(4_000L));
     }
 
     @Test
@@ -235,13 +173,11 @@ class WebhookDeliveryIT {
         UUID eventId = receivePayment("payment-trickle");
 
         Map<String, Object> delivery = awaitDeliveries(eventId, 1).getFirst();
-        assertThat(receiver.trickledRequests()).isEqualTo(1);
+        assertThat(receiver.trickledRequests()).isEqualTo(3);
         assertThat(delivery.get("status")).isEqualTo("FAILED");
         assertThat(delivery.get("last_error")).isEqualTo("request exceeded the 2000 ms deadline");
-        assertThat(jdbc.sql("""
-                        select a.duration_ms from delivery_attempt a join delivery d on d.id = a.delivery_id
-                         where d.event_id = :eventId
-                        """).param("eventId", eventId).query(Long.class).single()).isBetween(2_000L, 4_000L);
+        assertThat(attemptDurations(eventId)).hasSize(3).allSatisfy(duration -> assertThat(duration)
+                .isBetween(2_000L, 4_000L));
     }
 
     @Test
@@ -264,7 +200,7 @@ class WebhookDeliveryIT {
     void processesRepeatedMessagesOnlyOnce() {
         subscribe("/once", "payment.captured");
         UUID eventId = receivePayment("payment-once");
-        UUID deliveryId = UUID.fromString(awaitDeliveries(eventId, 1).getFirst().get("id").toString());
+        UUID deliveryId = (UUID) awaitDeliveries(eventId, 1).getFirst().get("id");
 
         int redispatched = dispatchEvent.dispatch(eventId);
         Optional<DeliveryStatus> redelivered = deliverWebhook.deliver(deliveryId);
@@ -297,7 +233,7 @@ class WebhookDeliveryIT {
     }
 
     @Test
-    void parksMessagesThatCannotBeProcessed() {
+    void parksMessagesThatCannotBeProcessedWithoutRetryingThem() {
         String malformed = UUID.randomUUID().toString();
         String unknownEvent = UUID.randomUUID().toString();
         String wrongVersion = UUID.randomUUID().toString();
@@ -307,7 +243,7 @@ class WebhookDeliveryIT {
         publish(wrongVersion, "delivery.requested", 2, "{\"deliveryId\":\"" + UUID.randomUUID() + "\"}");
 
         List<String> parked = new ArrayList<>();
-        await().atMost(DELIVERY_TIMEOUT).until(() -> {
+        await().atMost(PARKING_TIMEOUT).until(() -> {
             Message message = rabbit.receive(MessagingTopology.PARKING_QUEUE, 200);
             if (message != null) {
                 parked.add(message.getMessageProperties().getMessageId());
@@ -329,11 +265,6 @@ class WebhookDeliveryIT {
                 .build());
     }
 
-    private CreatedSubscription subscribe(String path, String... eventTypes) {
-        return subscriptions.create(client, WebhookEndpoint.parse(receiver.url(path)),
-                SubscribedEventTypes.of(List.of(eventTypes)));
-    }
-
     private void moveEndpoint(CreatedSubscription subscription, String url) {
         jdbc.sql("update subscription set endpoint_url = :url where id = :id")
                 .param("url", url)
@@ -345,8 +276,9 @@ class WebhookDeliveryIT {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
                         insert into delivery (
-                            id, event_id, subscription_id, client_id, status, attempts, created_at, updated_at)
-                        values (:id, :eventId, :subscriptionId, :clientId, 'PENDING', 0, now(), now())
+                            id, event_id, subscription_id, client_id, status, attempts, max_attempts, next_attempt_at,
+                            created_at, updated_at)
+                        values (:id, :eventId, :subscriptionId, :clientId, 'PENDING', 0, 3, now(), now(), now())
                         """)
                 .param("id", id)
                 .param("eventId", eventId)
@@ -356,29 +288,11 @@ class WebhookDeliveryIT {
         return id;
     }
 
-    private UUID receivePayment(String idempotencyKey) {
-        ReceiveEventResult result = receiveEvent.receive(new ReceiveEventCommand(client,
-                new IdempotencyKey(idempotencyKey), new CorrelationId("delivery-it"),
-                new StrictJsonReader().read("""
-                        {"type": "payment.captured", "dataversion": "1", "time": "2026-10-20T12:00:00Z",
-                         "source": "urn:acme:payments", "data": {"paymentId": "p-1", "orderId": "o-1",
-                         "amount": "15.00", "currency": "BRL"}}
-                        """.getBytes(StandardCharsets.UTF_8))));
-        return UUID.fromString(((ReceiveEventResult.Accepted) result).receipt().id().toString());
-    }
-
-    private List<Map<String, Object>> awaitDeliveries(UUID eventId, int expected) {
-        await().atMost(DELIVERY_TIMEOUT).until(() -> jdbc.sql("""
-                        select count(*) from outbox_message where status = 'PENDING'
-                        """).query(Long.class).single() == 0
-                && jdbc.sql("select count(*) from delivery where event_id = :eventId and status <> 'PENDING'")
-                        .param("eventId", eventId).query(Long.class).single() == expected
-                && jdbc.sql("select count(*) from delivery where event_id = :eventId")
-                        .param("eventId", eventId).query(Long.class).single() == expected);
-        return jdbc.sql("select id, subscription_id, status, attempts, last_error from delivery where event_id = :id")
-                .param("id", eventId)
-                .query()
-                .listOfRows();
+    private List<Long> attemptDurations(UUID eventId) {
+        return jdbc.sql("""
+                        select a.duration_ms from delivery_attempt a join delivery d on d.id = a.delivery_id
+                         where d.event_id = :eventId order by a.attempt_number
+                        """).param("eventId", eventId).query(Long.class).list();
     }
 
     private UUID deliveryFor(UUID eventId, CreatedSubscription subscription) {
@@ -399,22 +313,5 @@ class WebhookDeliveryIT {
         mac.update((webhook.header("webhook-id") + "." + webhook.header("webhook-timestamp") + ".")
                 .getBytes(StandardCharsets.UTF_8));
         return "v1," + Base64.getEncoder().encodeToString(mac.doFinal(webhook.body()));
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ReceiverEgressPolicy {
-
-        @Bean
-        @Primary
-        EgressPolicy receiverAwareEgressPolicy(HostResolver hostResolver, EgressProperties properties) {
-            return new EgressPolicy(hostResolver, properties) {
-                @Override
-                public List<InetAddress> resolvePublic(String host) {
-                    return WebhookReceiver.HOST.equals(host)
-                            ? List.of(InetAddress.getLoopbackAddress())
-                            : super.resolvePublic(host);
-                }
-            };
-        }
     }
 }

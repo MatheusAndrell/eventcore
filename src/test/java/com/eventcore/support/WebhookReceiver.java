@@ -19,6 +19,7 @@ import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -26,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -40,6 +42,7 @@ public final class WebhookReceiver implements AutoCloseable {
     private static final String ALIAS = "receiver";
 
     private static final Duration TRICKLE_INTERVAL = Duration.ofMillis(200);
+    private static WebhookReceiver shared;
 
     private final HttpsServer server;
     private final ServerSocket trickling;
@@ -49,6 +52,7 @@ public final class WebhookReceiver implements AutoCloseable {
     private final String password;
     private final List<ReceivedWebhook> received = new CopyOnWriteArrayList<>();
     private final Map<String, Reply> replies = new ConcurrentHashMap<>();
+    private final Map<String, Deque<Reply>> scripted = new ConcurrentHashMap<>();
 
     private WebhookReceiver(Path directory, String password) throws IOException, GeneralSecurityException {
         this.password = password;
@@ -72,13 +76,28 @@ public final class WebhookReceiver implements AutoCloseable {
         executor.submit(this::acceptTricklingConnections);
     }
 
-    public static WebhookReceiver start() {
+    public static synchronized WebhookReceiver shared() {
+        if (shared == null) {
+            shared = start();
+            Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(shared::close));
+        }
+        return shared;
+    }
+
+    private static WebhookReceiver start() {
         try {
             byte[] secret = new byte[16];
             new SecureRandom().nextBytes(secret);
             return new WebhookReceiver(Files.createTempDirectory("webhook-receiver"), HexFormat.of().formatHex(secret));
         } catch (IOException | GeneralSecurityException exception) {
             throw new IllegalStateException("could not start the webhook receiver", exception);
+        }
+    }
+
+    public void replyInOrder(String path, int... statuses) {
+        Deque<Reply> sequence = scripted.computeIfAbsent(path, ignored -> new ConcurrentLinkedDeque<>());
+        for (int status : statuses) {
+            sequence.add(new Reply(status, Duration.ZERO, Optional.empty()));
         }
     }
 
@@ -133,6 +152,7 @@ public final class WebhookReceiver implements AutoCloseable {
     public void reset() {
         received.clear();
         replies.clear();
+        scripted.clear();
         trickledRequests.set(0);
     }
 
@@ -195,7 +215,9 @@ public final class WebhookReceiver implements AutoCloseable {
                 headers.put(name.toLowerCase(Locale.ROOT), String.join(",", values)));
         String path = exchange.getRequestURI().getPath();
         received.add(new ReceivedWebhook(exchange.getRequestMethod(), path, headers, body));
-        Reply reply = replies.getOrDefault(path, new Reply(204, Duration.ZERO, Optional.empty()));
+        Deque<Reply> sequence = scripted.get(path);
+        Reply next = sequence == null ? null : sequence.poll();
+        Reply reply = next != null ? next : replies.getOrDefault(path, new Reply(204, Duration.ZERO, Optional.empty()));
         if (!reply.delay().isZero()) {
             try {
                 Thread.sleep(reply.delay());

@@ -145,6 +145,71 @@ class JdbcEventStore implements EventStore {
     }
 
     @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean markDispatched(EventId eventId) {
+        return jdbc.sql("""
+                        update event set status = 'DISPATCHED', dispatched_at = now()
+                         where id = :id and status = 'RECEIVED'
+                        """)
+                .param("id", eventId.value())
+                .update() == 1;
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<Event> claimUndispatched(Duration staleAfter, int limit) {
+        return jdbc.sql("""
+                        update event e set dispatch_requeued_at = now()
+                         where e.id in (
+                               select id from event
+                                where status = 'RECEIVED'
+                                  and coalesce(dispatch_requeued_at, received_at)
+                                      < now() - (:staleMillis * interval '1 millisecond')
+                                order by received_at, id
+                                limit :limit
+                                  for update skip locked)
+                        returning e.id, e.client_id, e.type, e.data_version, e.source, e.subject, e.occurred_at,
+                                  e.received_at, e.data::text as data, e.status, e.correlation_id
+                        """)
+                .param("staleMillis", staleAfter.toMillis())
+                .param("limit", limit)
+                .query(JdbcEventStore::event)
+                .list();
+    }
+
+    @Override
+    public int deleteExpiredIdempotencyRecords(int limit) {
+        return jdbc.sql("""
+                        delete from idempotency_record where (client_id, idempotency_key) in (
+                            select client_id, idempotency_key from idempotency_record
+                             where expires_at < now()
+                             limit :limit
+                               for update skip locked)
+                        """)
+                .param("limit", limit)
+                .update();
+    }
+
+    @Override
+    public int deleteDispatchedEventsWithoutDeliveries(Duration age, int limit) {
+        return jdbc.sql("""
+                        with expired as (
+                            select e.id from event e
+                             where e.status = 'DISPATCHED'
+                               and e.received_at < now() - (:ageMillis * interval '1 millisecond')
+                               and not exists (select 1 from delivery d where d.event_id = e.id)
+                             limit :limit
+                               for update skip locked),
+                        keys as (
+                            delete from idempotency_record where event_id in (select id from expired))
+                        delete from event where id in (select id from expired)
+                        """)
+                .param("ageMillis", age.toMillis())
+                .param("limit", limit)
+                .update();
+    }
+
+    @Override
     public List<EventSummary> listEvents(
             ClientId clientId, EventCriteria criteria, Optional<EventCursor> after, int limit) {
         return jdbc.sql("""

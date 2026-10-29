@@ -1,6 +1,54 @@
 name: eventcore
 
+x-eventcore: &eventcore
+  image: eventcore:local
+  build: .
+  profiles: [app]
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+  environment: &eventcore-environment
+    SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+    SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:?POSTGRES_USER is required}
+    SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    SPRING_RABBITMQ_HOST: rabbitmq
+    SPRING_RABBITMQ_PORT: 5672
+    SPRING_RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}
+    SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
+    EVENTCORE_API_KEY_PEPPERS: ${EVENTCORE_API_KEY_PEPPERS:?EVENTCORE_API_KEY_PEPPERS is required}
+    EVENTCORE_ACTIVE_API_KEY_PEPPER: ${EVENTCORE_ACTIVE_API_KEY_PEPPER:?EVENTCORE_ACTIVE_API_KEY_PEPPER is required}
+    EVENTCORE_TRACING_SAMPLING_PROBABILITY: ${EVENTCORE_TRACING_SAMPLING_PROBABILITY:-0.1}
+
 services:
+  api:
+    <<: *eventcore
+    environment:
+      <<: *eventcore-environment
+      EVENTCORE_ROLES: api
+      EVENTCORE_BOOTSTRAP_ADMIN_KEY: ${EVENTCORE_BOOTSTRAP_ADMIN_KEY:-}
+      EVENTCORE_WEBHOOK_SECRET_KEYS: ${EVENTCORE_WEBHOOK_SECRET_KEYS:?EVENTCORE_WEBHOOK_SECRET_KEYS is required}
+      EVENTCORE_ACTIVE_WEBHOOK_SECRET_KEY: ${EVENTCORE_ACTIVE_WEBHOOK_SECRET_KEY:?EVENTCORE_ACTIVE_WEBHOOK_SECRET_KEY is required}
+    ports:
+      - "127.0.0.1:${EVENTCORE_API_PORT:-8080}:8080"
+      - "127.0.0.1:${EVENTCORE_API_MANAGEMENT_PORT:-8081}:8081"
+
+  relay:
+    <<: *eventcore
+    environment:
+      <<: *eventcore-environment
+      EVENTCORE_ROLES: relay
+
+  worker:
+    <<: *eventcore
+    environment:
+      <<: *eventcore-environment
+      EVENTCORE_ROLES: worker
+      EVENTCORE_WEBHOOK_SECRET_KEYS: ${EVENTCORE_WEBHOOK_SECRET_KEYS:?EVENTCORE_WEBHOOK_SECRET_KEYS is required}
+      EVENTCORE_ACTIVE_WEBHOOK_SECRET_KEY: ${EVENTCORE_ACTIVE_WEBHOOK_SECRET_KEY:?EVENTCORE_ACTIVE_WEBHOOK_SECRET_KEY is required}
+
   postgres:
     image: postgres:18.6-alpine
     environment:

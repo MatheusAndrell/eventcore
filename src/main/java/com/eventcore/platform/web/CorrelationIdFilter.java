@@ -14,7 +14,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class CorrelationIdFilter extends OncePerRequestFilter {
 
     public static final String HEADER = "X-Correlation-Id";
-    static final String MDC_KEY = "correlationId";
     private static final String ATTRIBUTE = CorrelationIdFilter.class.getName();
 
     private final UuidV7Generator ids;
@@ -39,7 +38,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
                 .orElseGet(() -> new CorrelationId(ids.next().toString()));
         request.setAttribute(ATTRIBUTE, correlationId);
         response.setHeader(HEADER, correlationId.value());
-        try (var _ = MDC.putCloseable(MDC_KEY, correlationId.value())) {
+        try (var _ = MDC.putCloseable(CorrelationId.MDC_KEY, correlationId.value())) {
             chain.doFilter(request, response);
         }
     }

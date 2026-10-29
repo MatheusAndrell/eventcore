@@ -1,5 +1,6 @@
 package com.eventcore.ingestion.domain;
 
 public enum EventStatus {
-    RECEIVED
+    RECEIVED,
+    DISPATCHED
 }

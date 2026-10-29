@@ -11,6 +11,7 @@ import com.eventcore.outbox.application.Outbox;
 import com.eventcore.platform.identity.UuidV7Generator;
 import com.eventcore.platform.json.CanonicalizationException;
 import com.eventcore.platform.json.JsonCanonicalizer;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -18,6 +19,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
@@ -27,6 +29,7 @@ import tools.jackson.databind.JsonNode;
 public class ReceiveEvent {
 
     private static final byte[] FINGERPRINT_SCOPE = "receive-event\n".getBytes(StandardCharsets.UTF_8);
+    private static final String RECEIVED_METRIC = "eventcore.events.received";
 
     private final EnvelopeReader envelopeReader;
     private final EventCatalog catalog;
@@ -37,6 +40,7 @@ public class ReceiveEvent {
     private final Clock clock;
     private final TransactionOperations transactions;
     private final IngestionProperties properties;
+    private final MeterRegistry meters;
 
     public ReceiveEvent(
             EnvelopeReader envelopeReader,
@@ -47,7 +51,9 @@ public class ReceiveEvent {
             UuidV7Generator ids,
             Clock clock,
             TransactionOperations transactions,
-            IngestionProperties properties) {
+            IngestionProperties properties,
+            MeterRegistry meters) {
+        this.meters = meters;
         this.envelopeReader = envelopeReader;
         this.catalog = catalog;
         this.eventStore = eventStore;
@@ -60,6 +66,28 @@ public class ReceiveEvent {
     }
 
     public ReceiveEventResult receive(ReceiveEventCommand command) {
+        ReceiveEventResult result = process(command);
+        meters.counter(RECEIVED_METRIC, "outcome", outcome(result), "reason", reason(result)).increment();
+        return result;
+    }
+
+    private static String outcome(ReceiveEventResult result) {
+        return switch (result) {
+            case ReceiveEventResult.Accepted _ -> "accepted";
+            case ReceiveEventResult.Replayed _ -> "replayed";
+            case ReceiveEventResult.Rejected _ -> "rejected";
+            case ReceiveEventResult.IdempotencyKeyReused _ -> "idempotency_key_reused";
+            case ReceiveEventResult.ConcurrentRequestInProgress _ -> "in_progress";
+        };
+    }
+
+    private static String reason(ReceiveEventResult result) {
+        return result instanceof ReceiveEventResult.Rejected rejected
+                ? rejected.reason().name().toLowerCase(Locale.ROOT)
+                : "none";
+    }
+
+    private ReceiveEventResult process(ReceiveEventCommand command) {
         try {
             RequestFingerprint fingerprint = fingerprint(command.body());
             Optional<ReceiveEventResult> previous = eventStore

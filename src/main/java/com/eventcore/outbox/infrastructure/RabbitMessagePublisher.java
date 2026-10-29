@@ -75,7 +75,9 @@ class RabbitMessagePublisher implements MessagePublisher {
     }
 
     private static Message toAmqpMessage(PendingMessage message) {
-        return MessageBuilder.withBody(message.payload().getBytes(StandardCharsets.UTF_8))
+        MessageBuilder builder = MessageBuilder.withBody(message.payload().getBytes(StandardCharsets.UTF_8));
+        message.traceContext().forEach(builder::setHeader);
+        return builder
                 .setMessageId(message.id().toString())
                 .setType(message.messageType())
                 .setContentType(MessageProperties.CONTENT_TYPE_JSON)

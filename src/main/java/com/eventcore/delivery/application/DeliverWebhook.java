@@ -4,6 +4,8 @@ import com.eventcore.delivery.domain.DeliveryStatus;
 import com.eventcore.delivery.domain.StandardWebhookSignature;
 import com.eventcore.ingestion.application.EventQueries;
 import com.eventcore.ingestion.application.EventView;
+import com.eventcore.outbox.application.Outbox;
+import com.eventcore.platform.identity.CorrelationId;
 import com.eventcore.platform.identity.UuidV7Generator;
 import com.eventcore.platform.json.JsonCanonicalizer;
 import com.eventcore.platform.json.StrictJsonReader;
@@ -11,7 +13,9 @@ import com.eventcore.platform.roles.ConditionalOnRole;
 import com.eventcore.platform.roles.Role;
 import com.eventcore.subscription.application.DeliveryTarget;
 import com.eventcore.subscription.application.SubscriptionDirectory;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,6 +25,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 import tools.jackson.databind.node.JsonNodeFactory;
@@ -31,6 +36,7 @@ import tools.jackson.databind.node.ObjectNode;
 public class DeliverWebhook {
 
     public static final String DELIVERY_ID_HEADER = "eventcore-delivery-id";
+    private static final String OUTCOME_METRIC = "eventcore.deliveries.outcomes";
     private static final Logger log = LoggerFactory.getLogger(DeliverWebhook.class);
 
     private final DeliveryStore store;
@@ -43,21 +49,28 @@ public class DeliverWebhook {
     private final Clock clock;
     private final TransactionOperations transactions;
     private final DeliveryProperties properties;
+    private final Outbox outbox;
+    private final MeterRegistry meters;
+    private final SecureRandom random = new SecureRandom();
 
     public DeliverWebhook(
             DeliveryStore store,
             SubscriptionDirectory subscriptions,
             EventQueries events,
+            Outbox outbox,
             WebhookTransport transport,
             StrictJsonReader jsonReader,
             JsonCanonicalizer canonicalizer,
             UuidV7Generator ids,
             Clock clock,
             TransactionOperations transactions,
-            DeliveryProperties properties) {
+            DeliveryProperties properties,
+            MeterRegistry meters) {
+        this.meters = meters;
         this.store = store;
         this.subscriptions = subscriptions;
         this.events = events;
+        this.outbox = outbox;
         this.transport = transport;
         this.jsonReader = jsonReader;
         this.canonicalizer = canonicalizer;
@@ -78,12 +91,15 @@ public class DeliverWebhook {
         if (target.isEmpty() || !target.get().active()) {
             String reason = target.isEmpty() ? "subscription was deleted" : "subscription is paused";
             store.cancel(delivery, reason, now());
+            meters.counter(OUTCOME_METRIC, "outcome", "cancelled").increment();
             log.info("delivery {} cancelled: {}", delivery.id(), reason);
             return Optional.of(DeliveryStatus.CANCELLED);
         }
         EventView event = events.view(delivery.eventId()).orElseThrow(() -> new IllegalStateException(
                 "delivery " + delivery.id() + " references missing event " + delivery.eventId()));
-        return Optional.of(send(delivery, target.get(), event));
+        try (var _ = MDC.putCloseable(CorrelationId.MDC_KEY, event.correlationId().value())) {
+            return Optional.of(send(delivery, target.get(), event));
+        }
     }
 
     private DeliveryStatus send(ClaimedDelivery delivery, DeliveryTarget target, EventView event) {
@@ -101,16 +117,50 @@ public class DeliverWebhook {
         TransportResult result = transport.send(request);
         DeliveryAttempt attempt = DeliveryAttempt.of(ids.next(), delivery.attemptNumber(), startedAt,
                 Duration.ofNanos(System.nanoTime() - started), result);
-        DeliveryStatus status = attempt.succeeded() ? DeliveryStatus.SUCCEEDED : DeliveryStatus.FAILED;
-        Boolean recorded = transactions.execute(transaction -> store.complete(delivery, attempt, status, now()));
+        DeliveryStatus status = outcome(attempt, delivery);
+        Boolean recorded = transactions.execute(transaction -> status == DeliveryStatus.PENDING
+                ? scheduleRetry(delivery, attempt, retryAfter(result))
+                : store.complete(delivery, attempt, status, now()));
         if (!Boolean.TRUE.equals(recorded)) {
+            meters.counter(OUTCOME_METRIC, "outcome", "lease_lost").increment();
             log.warn("delivery {} attempt {} finished after its lease was lost; the result was not recorded",
                     delivery.id(), delivery.attemptNumber());
-        } else if (status == DeliveryStatus.FAILED) {
-            log.warn("delivery {} to subscription {} failed on attempt {}: {}", delivery.id(),
-                    delivery.subscriptionId(), delivery.attemptNumber(), attempt.error().orElse("unknown error"));
+            return status;
+        }
+        meters.counter(OUTCOME_METRIC, "outcome", switch (status) {
+            case SUCCEEDED -> "succeeded";
+            case PENDING -> "retry_scheduled";
+            case FAILED -> "failed";
+            case CANCELLED -> "cancelled";
+        }).increment();
+        if (!attempt.succeeded()) {
+            log.warn("delivery {} to subscription {} failed on attempt {} of {}{}: {}", delivery.id(),
+                    delivery.subscriptionId(), delivery.attemptNumber(), delivery.maxAttempts(),
+                    status == DeliveryStatus.FAILED ? " and has no attempts left" : "",
+                    attempt.error().orElse("unknown error"));
         }
         return status;
+    }
+
+    private boolean scheduleRetry(ClaimedDelivery delivery, DeliveryAttempt attempt, Optional<Duration> retryAfter) {
+        Duration delay = properties.retryPolicy().delayAfter(delivery.attemptNumber(), retryAfter,
+                random.nextDouble());
+        if (!store.scheduleRetry(delivery, attempt, delay, now())) {
+            return false;
+        }
+        outbox.enqueueAfter(DeliveryRequestedMessage.of(ids.next(), delivery.id(), now()), delay);
+        return true;
+    }
+
+    private static DeliveryStatus outcome(DeliveryAttempt attempt, ClaimedDelivery delivery) {
+        if (attempt.succeeded()) {
+            return DeliveryStatus.SUCCEEDED;
+        }
+        return delivery.lastAttempt() ? DeliveryStatus.FAILED : DeliveryStatus.PENDING;
+    }
+
+    private static Optional<Duration> retryAfter(TransportResult result) {
+        return result instanceof TransportResult.Responded responded ? responded.retryAfter() : Optional.empty();
     }
 
     private byte[] payload(EventView event) {

@@ -1,6 +1,7 @@
 package com.eventcore.outbox.application;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -13,7 +14,8 @@ public record PendingMessage(
         UUID aggregateId,
         String payload,
         Instant createdAt,
-        int publishAttempts) {
+        int publishAttempts,
+        Map<String, String> traceContext) {
 
     public PendingMessage {
         Objects.requireNonNull(id, "id");
@@ -23,5 +25,6 @@ public record PendingMessage(
         Objects.requireNonNull(aggregateId, "aggregateId");
         Objects.requireNonNull(payload, "payload");
         Objects.requireNonNull(createdAt, "createdAt");
+        traceContext = Map.copyOf(traceContext);
     }
 }

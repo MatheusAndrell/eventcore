@@ -39,3 +39,17 @@ jobs:
             target/surefire-reports/
             target/failsafe-reports/
           retention-days: 7
+
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker build --tag eventcore:${{ github.sha }} .
+
+      - name: Check image runs as an unprivileged user
+        run: test "$(docker image inspect --format '{{.Config.User}}' eventcore:${{ github.sha }})" = "10001:10001"

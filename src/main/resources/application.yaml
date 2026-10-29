@@ -17,6 +17,13 @@ spring:
       simple:
         concurrency: 4
         prefetch: 5
+        observation-enabled: true
+        retry:
+          enabled: true
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 10s
+          max-retries: 4
 
 server:
   port: 8080
@@ -28,7 +35,14 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health, prometheus
+  tracing:
+    sampling:
+      probability: ${EVENTCORE_TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    metrics:
+      export:
+        enabled: ${EVENTCORE_OTLP_METRICS_ENABLED:false}
   endpoint:
     health:
       show-details: never

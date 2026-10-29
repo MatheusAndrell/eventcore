@@ -2,11 +2,16 @@ package com.eventcore.outbox.infrastructure;
 
 import com.eventcore.outbox.application.OutboxStore;
 import com.eventcore.outbox.application.PendingMessage;
+import com.eventcore.platform.json.StrictJsonReader;
+import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -15,9 +20,11 @@ import org.springframework.stereotype.Repository;
 class JdbcOutboxStore implements OutboxStore {
 
     private final JdbcClient jdbc;
+    private final StrictJsonReader jsonReader;
 
-    JdbcOutboxStore(JdbcClient jdbc) {
+    JdbcOutboxStore(JdbcClient jdbc, StrictJsonReader jsonReader) {
         this.jdbc = jdbc;
+        this.jsonReader = jsonReader;
     }
 
     @Override
@@ -35,12 +42,13 @@ class JdbcOutboxStore implements OutboxStore {
                                 limit :batchSize
                                   for update skip locked)
                         returning o.id, o.exchange, o.routing_key, o.message_type, o.message_version,
-                                  o.aggregate_id, o.payload::text as payload, o.created_at, o.publish_attempts
+                                  o.aggregate_id, o.payload::text as payload, o.created_at, o.publish_attempts,
+                                  o.trace_context::text as trace_context
                         """)
                 .param("claimToken", claimToken)
                 .param("leaseMillis", lease.toMillis())
                 .param("batchSize", batchSize)
-                .query(JdbcOutboxStore::pendingMessage)
+                .query(this::pendingMessage)
                 .list();
     }
 
@@ -73,7 +81,49 @@ class JdbcOutboxStore implements OutboxStore {
                 .update() == 1;
     }
 
-    private static PendingMessage pendingMessage(ResultSet row, int rowNumber) throws SQLException {
+    @Override
+    public long countPending() {
+        return jdbc.sql("select count(*) from outbox_message where status = 'PENDING'").query(Long.class).single();
+    }
+
+    @Override
+    public Optional<Duration> oldestPendingAge() {
+        return jdbc.sql("""
+                        select extract(epoch from now() - min(created_at)) * 1000
+                          from outbox_message where status = 'PENDING'
+                        having count(*) > 0
+                        """)
+                .query(Double.class)
+                .optional()
+                .map(millis -> Duration.ofMillis(Math.max(0, Math.round(millis))));
+    }
+
+    @Override
+    public int deletePublishedBefore(Duration age, int limit) {
+        return jdbc.sql("""
+                        delete from outbox_message where id in (
+                            select id from outbox_message
+                             where status = 'PUBLISHED'
+                               and published_at < now() - (:ageMillis * interval '1 millisecond')
+                             limit :limit
+                               for update skip locked)
+                        """)
+                .param("ageMillis", age.toMillis())
+                .param("limit", limit)
+                .update();
+    }
+
+    private Map<String, String> traceContext(String json) {
+        if (json == null) {
+            return Map.of();
+        }
+        Map<String, String> context = new LinkedHashMap<>();
+        jsonReader.read(json.getBytes(StandardCharsets.UTF_8)).properties()
+                .forEach(entry -> context.put(entry.getKey(), entry.getValue().asString()));
+        return context;
+    }
+
+    private PendingMessage pendingMessage(ResultSet row, int rowNumber) throws SQLException {
         return new PendingMessage(
                 row.getObject("id", UUID.class),
                 row.getString("exchange"),
@@ -83,6 +133,7 @@ class JdbcOutboxStore implements OutboxStore {
                 row.getObject("aggregate_id", UUID.class),
                 row.getString("payload"),
                 row.getObject("created_at", OffsetDateTime.class).toInstant(),
-                row.getInt("publish_attempts"));
+                row.getInt("publish_attempts"),
+                traceContext(row.getString("trace_context")));
     }
 }

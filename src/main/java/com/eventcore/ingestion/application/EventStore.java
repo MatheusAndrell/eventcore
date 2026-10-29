@@ -20,5 +20,13 @@ public interface EventStore {
 
     Optional<Event> findEvent(EventId eventId);
 
+    boolean markDispatched(EventId eventId);
+
+    List<Event> claimUndispatched(Duration staleAfter, int limit);
+
+    int deleteExpiredIdempotencyRecords(int limit);
+
+    int deleteDispatchedEventsWithoutDeliveries(Duration age, int limit);
+
     List<EventSummary> listEvents(ClientId clientId, EventCriteria criteria, Optional<EventCursor> after, int limit);
 }

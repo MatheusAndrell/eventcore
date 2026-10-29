@@ -11,11 +11,13 @@ import static org.awaitility.Awaitility.await;
 import com.eventcore.platform.messaging.MessagingTopology;
 import com.eventcore.support.TestcontainersConfiguration;
 import java.nio.charset.StandardCharsets;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -96,7 +98,7 @@ class OutboxPublisherIT {
             insertPendingEventAccepted(jdbc);
         }
         OutboxPublisher smallBatches = new OutboxPublisher(store, messagePublisher,
-                properties(25, Duration.ofSeconds(30), Duration.ofSeconds(5)));
+                properties(25, Duration.ofSeconds(30), Duration.ofSeconds(5)), new SimpleMeterRegistry());
         List<Future<Integer>> results = new ArrayList<>();
 
         try (ExecutorService executor = Executors.newFixedThreadPool(4)) {
@@ -189,9 +191,24 @@ class OutboxPublisherIT {
             public boolean reschedule(UUID messageId, UUID claimToken, Duration delay, String error) {
                 return store.reschedule(messageId, claimToken, delay, error);
             }
+
+            @Override
+            public long countPending() {
+                return store.countPending();
+            }
+
+            @Override
+            public Optional<Duration> oldestPendingAge() {
+                return store.oldestPendingAge();
+            }
+
+            @Override
+            public int deletePublishedBefore(Duration age, int limit) {
+                return store.deletePublishedBefore(age, limit);
+            }
         };
         OutboxPublisher shortLease = new OutboxPublisher(crashingStore, messagePublisher,
-                properties(10, Duration.ofSeconds(1), Duration.ofMillis(400)));
+                properties(10, Duration.ofSeconds(1), Duration.ofMillis(400)), new SimpleMeterRegistry());
 
         assertThatThrownBy(shortLease::publishBatch).isInstanceOf(DataAccessResourceFailureException.class);
         assertThat(status(jdbc, id)).isEqualTo("PENDING");

@@ -8,7 +8,10 @@ import com.eventcore.platform.egress.EgressDeniedException;
 import com.eventcore.platform.egress.EgressPolicy;
 import com.eventcore.platform.roles.ConditionalOnRole;
 import com.eventcore.platform.roles.Role;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -25,6 +28,7 @@ import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuil
 import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.HttpHeaders;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.ssl.SSLContexts;
 import org.apache.hc.core5.util.Timeout;
@@ -37,15 +41,25 @@ import org.springframework.stereotype.Component;
 class HttpClientWebhookTransport implements WebhookTransport, DisposableBean {
 
     static final String USER_AGENT = "EventCore-Webhooks/1";
+    private static final String OBSERVATION = "eventcore.webhook.request";
 
     private final EgressPolicy egressPolicy;
+    private final ObservationRegistry observations;
+    private final Clock clock;
     private final Duration requestTimeout;
     private final CloseableHttpClient client;
     private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().name("webhook-deadlines").daemon().factory());
 
-    HttpClientWebhookTransport(EgressPolicy egressPolicy, DeliveryProperties properties, SslBundles sslBundles) {
+    HttpClientWebhookTransport(
+            EgressPolicy egressPolicy,
+            DeliveryProperties properties,
+            SslBundles sslBundles,
+            Clock clock,
+            ObservationRegistry observations) {
         this.egressPolicy = egressPolicy;
+        this.observations = observations;
+        this.clock = clock;
         this.requestTimeout = properties.requestTimeout();
         SSLContext sslContext = properties.configuredSslBundle()
                 .map(bundle -> sslBundles.getBundle(bundle).createSslContext())
@@ -78,6 +92,26 @@ class HttpClientWebhookTransport implements WebhookTransport, DisposableBean {
 
     @Override
     public TransportResult send(WebhookRequest request) {
+        Observation observation = Observation.createNotStarted(OBSERVATION, observations)
+                .contextualName("webhook delivery")
+                .start();
+        try (Observation.Scope _ = observation.openScope()) {
+            TransportResult result = post(request);
+            observation.lowCardinalityKeyValue("outcome", outcome(result));
+            return result;
+        } finally {
+            observation.stop();
+        }
+    }
+
+    private static String outcome(TransportResult result) {
+        return switch (result) {
+            case TransportResult.Responded responded -> (responded.statusCode() / 100) + "xx";
+            case TransportResult.Failed _ -> "transport_error";
+        };
+    }
+
+    private TransportResult post(WebhookRequest request) {
         try {
             egressPolicy.check(request.endpoint());
         } catch (EgressDeniedException exception) {
@@ -88,7 +122,8 @@ class HttpClientWebhookTransport implements WebhookTransport, DisposableBean {
         post.setEntity(new ByteArrayEntity(request.body(), ContentType.APPLICATION_JSON));
         ScheduledFuture<?> deadline = deadlines.schedule(post::cancel, requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
         try (ClassicHttpResponse response = client.executeOpen(null, post, null)) {
-            return new TransportResult.Responded(response.getCode());
+            return new TransportResult.Responded(response.getCode(),
+                    RetryAfterHeader.parse(response.getFirstHeader(HttpHeaders.RETRY_AFTER), clock.instant()));
         } catch (EgressDeniedException exception) {
             return denied(exception);
         } catch (IOException exception) {
